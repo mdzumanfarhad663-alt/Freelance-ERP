@@ -30,6 +30,30 @@ export const TASK_PRIORITY_STYLES: Record<string, string> = {
   HIGH: "bg-red-50 text-red-700 ring-red-600/20",
 };
 
+export const INVOICE_STATUS_LABELS: Record<string, string> = {
+  UNPAID: "Unpaid",
+  PAID: "Paid",
+};
+
+export const INVOICE_STATUS_STYLES: Record<string, string> = {
+  UNPAID: "bg-amber-50 text-amber-700 ring-amber-600/20",
+  PAID: "bg-green-50 text-green-700 ring-green-600/20",
+  OVERDUE: "bg-red-50 text-red-700 ring-red-600/20",
+};
+
+export function invoiceNumber(id: string): string {
+  return `INV-${id.slice(-6).toUpperCase()}`;
+}
+
+export function isOverdue(status: string, dueDate: string | Date | null | undefined): boolean {
+  if (status === "PAID" || !dueDate) return false;
+  const d = new Date(dueDate);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d < today;
+}
+
 export function formatMoney(value: unknown): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";

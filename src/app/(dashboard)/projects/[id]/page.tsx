@@ -5,6 +5,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
 import { KanbanBoard } from "@/components/tasks/kanban-board";
+import { InvoiceSuggestion } from "@/components/invoices/invoice-suggestion";
+import { AttachmentsPanel } from "@/components/attachments/attachments-panel";
 import { PROJECT_STATUS_LABELS, PROJECT_STATUS_STYLES, formatMoney, formatDate } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +20,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     include: {
       client: true,
       tasks: { orderBy: { createdAt: "desc" } },
+      attachments: { orderBy: { createdAt: "desc" } },
+      _count: { select: { invoices: true } },
     },
   });
 
   if (!project) notFound();
+
+  const needsInvoice = project.status === "COMPLETED" && project._count.invoices === 0;
 
   return (
     <div>
@@ -31,6 +37,18 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       >
         <ArrowLeft className="h-4 w-4" /> Back to projects
       </Link>
+
+      {needsInvoice && (
+        <InvoiceSuggestion
+          project={{
+            id: project.id,
+            title: project.title,
+            clientId: project.clientId,
+            budget: project.budget !== null ? Number(project.budget) : null,
+          }}
+          clientName={project.client.name}
+        />
+      )}
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="rounded-lg border border-gray-200 bg-white p-5 lg:col-span-2">
@@ -74,6 +92,19 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             )}
           </div>
         </div>
+      </div>
+
+      <div className="mt-6">
+        <AttachmentsPanel
+          projectId={project.id}
+          attachments={project.attachments.map((a) => ({
+            id: a.id,
+            name: a.name,
+            mimeType: a.mimeType,
+            url: a.url,
+            size: a.size,
+          }))}
+        />
       </div>
 
       <div className="mt-8">

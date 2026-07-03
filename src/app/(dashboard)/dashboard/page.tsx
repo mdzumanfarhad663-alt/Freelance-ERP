@@ -1,9 +1,18 @@
 import Link from "next/link";
-import { Users, FolderKanban, CheckCircle2, ListChecks, Clock } from "lucide-react";
+import {
+  Users,
+  FolderKanban,
+  ListChecks,
+  DollarSign,
+  Clock,
+  AlertTriangle,
+  Receipt,
+  TrendingUp,
+} from "lucide-react";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
-import { PROJECT_STATUS_LABELS, PROJECT_STATUS_STYLES, formatDate } from "@/lib/labels";
+import { PROJECT_STATUS_LABELS, PROJECT_STATUS_STYLES, invoiceNumber, formatMoney, formatDate } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -11,35 +20,71 @@ export default async function DashboardPage() {
   const session = await auth();
   const userId = session!.user.id;
 
-  const [clientCount, activeProjects, completedProjects, totalTasks, pendingTasks, recentProjects] =
-    await Promise.all([
-      db.client.count({ where: { userId } }),
-      db.project.count({ where: { userId, status: "ACTIVE" } }),
-      db.project.count({ where: { userId, status: "COMPLETED" } }),
-      db.task.count({ where: { project: { userId } } }),
-      db.task.count({ where: { project: { userId }, status: { not: "DONE" } } }),
-      db.project.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        include: { client: { select: { name: true } }, _count: { select: { tasks: true } } },
-      }),
-    ]);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const [
+    clientCount,
+    activeProjects,
+    pendingTasks,
+    paidAgg,
+    unpaidAgg,
+    monthAgg,
+    pendingInvoiceCount,
+    overdueInvoices,
+    projectsNoInvoice,
+    recentProjects,
+  ] = await Promise.all([
+    db.client.count({ where: { userId } }),
+    db.project.count({ where: { userId, status: "ACTIVE" } }),
+    db.task.count({ where: { project: { userId } }, }),
+    db.invoice.aggregate({ where: { userId, status: "PAID" }, _sum: { amount: true } }),
+    db.invoice.aggregate({ where: { userId, status: "UNPAID" }, _sum: { amount: true } }),
+    db.invoice.aggregate({
+      where: { userId, status: "PAID", paidAt: { gte: monthStart } },
+      _sum: { amount: true },
+    }),
+    db.invoice.count({ where: { userId, status: "UNPAID" } }),
+    db.invoice.findMany({
+      where: { userId, status: "UNPAID", dueDate: { lt: today } },
+      orderBy: { dueDate: "asc" },
+      include: { client: { select: { name: true } } },
+    }),
+    db.project.findMany({
+      where: { userId, status: "COMPLETED", invoices: { none: {} } },
+      orderBy: { updatedAt: "desc" },
+      include: { client: { select: { name: true } } },
+    }),
+    db.project.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      include: { client: { select: { name: true } }, _count: { select: { tasks: true } } },
+    }),
+  ]);
+
+  const totalRevenue = Number(paidAgg._sum.amount ?? 0);
+  const pendingRevenue = Number(unpaidAgg._sum.amount ?? 0);
+  const monthRevenue = Number(monthAgg._sum.amount ?? 0);
 
   const stats = [
-    { label: "Total Clients", value: clientCount, icon: Users, href: "/clients" },
-    { label: "Active Projects", value: activeProjects, icon: FolderKanban, href: "/projects" },
-    { label: "Completed Projects", value: completedProjects, icon: CheckCircle2, href: "/projects" },
-    { label: "Total Tasks", value: totalTasks, icon: ListChecks, href: "/tasks" },
-    { label: "Pending Tasks", value: pendingTasks, icon: Clock, href: "/tasks" },
+    { label: "Total Revenue", value: formatMoney(totalRevenue), icon: DollarSign, href: "/invoices" },
+    { label: "This Month", value: formatMoney(monthRevenue), icon: TrendingUp, href: "/invoices" },
+    { label: "Pending Revenue", value: formatMoney(pendingRevenue), icon: Clock, href: "/invoices" },
+    { label: "Clients", value: String(clientCount), icon: Users, href: "/clients" },
+    { label: "Active Projects", value: String(activeProjects), icon: FolderKanban, href: "/projects" },
+    { label: "Total Tasks", value: String(pendingTasks), icon: ListChecks, href: "/tasks" },
   ];
+
+  const hasAlerts = overdueInvoices.length > 0 || projectsNoInvoice.length > 0 || pendingInvoiceCount > 0;
 
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Dashboard</h1>
       <p className="mt-1 text-sm text-gray-500">Overview of your freelance business.</p>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         {stats.map((s) => (
           <Link
             key={s.label}
@@ -50,10 +95,63 @@ export default async function DashboardPage() {
               <p className="text-sm text-gray-500">{s.label}</p>
               <s.icon className="h-4 w-4 text-gray-400" />
             </div>
-            <p className="mt-2 text-2xl font-semibold text-gray-900">{s.value}</p>
+            <p className="mt-2 truncate text-xl font-semibold text-gray-900 sm:text-2xl">{s.value}</p>
           </Link>
         ))}
       </div>
+
+      {hasAlerts && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold text-gray-900">Needs Attention</h2>
+          <div className="mt-4 space-y-3">
+            {overdueInvoices.map((inv) => (
+              <Link
+                key={inv.id}
+                href={`/invoices/${inv.id}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 hover:bg-red-100"
+              >
+                <p className="inline-flex items-center gap-2 text-sm text-red-800">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="font-semibold">Overdue Invoice</span> — {invoiceNumber(inv.id)} ·{" "}
+                  {inv.client.name} · {formatMoney(inv.amount)}
+                </p>
+                <span className="text-xs font-medium text-red-600">Due {formatDate(inv.dueDate)}</span>
+              </Link>
+            ))}
+
+            {projectsNoInvoice.map((p) => (
+              <Link
+                key={p.id}
+                href={`/projects/${p.id}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 hover:bg-green-100"
+              >
+                <p className="inline-flex items-center gap-2 text-sm text-green-800">
+                  <Receipt className="h-4 w-4" />
+                  <span className="font-semibold">Ready to invoice</span> — &quot;{p.title}&quot; for{" "}
+                  {p.client.name} is completed with no invoice
+                </p>
+                <span className="text-xs font-medium text-green-700">Create invoice →</span>
+              </Link>
+            ))}
+
+            {pendingInvoiceCount > 0 && (
+              <Link
+                href="/invoices"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 hover:bg-amber-100"
+              >
+                <p className="inline-flex items-center gap-2 text-sm text-amber-800">
+                  <Clock className="h-4 w-4" />
+                  <span className="font-semibold">
+                    {pendingInvoiceCount} unpaid invoice{pendingInvoiceCount === 1 ? "" : "s"}
+                  </span>
+                  — {formatMoney(pendingRevenue)} outstanding
+                </p>
+                <span className="text-xs font-medium text-amber-700">View invoices →</span>
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="mt-8">
         <div className="flex items-center justify-between">

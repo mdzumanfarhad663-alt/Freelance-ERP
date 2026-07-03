@@ -83,3 +83,41 @@ export const taskUpdateSchema = z.object({
 });
 
 export type TaskInput = z.infer<typeof taskSchema>;
+
+export const INVOICE_STATUSES = ["UNPAID", "PAID"] as const;
+
+export const invoiceSchema = z.object({
+  clientId: z.string().min(1, "Client is required"),
+  projectId: z
+    .string()
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v ? v : null)),
+  amount: z
+    .union([z.string(), z.number()])
+    .transform((v) => (typeof v === "number" ? v : Number(v)))
+    .refine((v) => Number.isFinite(v) && v > 0, "Amount must be greater than 0"),
+  status: z.enum(INVOICE_STATUSES).default("UNPAID"),
+  notes: z
+    .string()
+    .trim()
+    .max(2000)
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v ? v : null)),
+  dueDate: z
+    .string()
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v ? new Date(v) : null))
+    .refine((v) => v === null || !Number.isNaN(v.getTime()), "Invalid date"),
+});
+
+export type InvoiceInput = z.infer<typeof invoiceSchema>;
+
+export const attachmentLinkSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(200),
+  url: z.string().trim().url("Enter a valid URL (e.g. a Google Drive link)"),
+  projectId: z.string().optional().nullable(),
+  invoiceId: z.string().optional().nullable(),
+});
